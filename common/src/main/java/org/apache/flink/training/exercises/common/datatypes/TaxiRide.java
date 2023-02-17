@@ -18,16 +18,16 @@
 
 package org.apache.flink.training.exercises.common.datatypes;
 
+import java.io.Serializable;
+import java.time.Instant;
+import java.util.Objects;
+
+import javax.annotation.Nullable;
+
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.training.exercises.common.utils.DataGenerator;
 import org.apache.flink.training.exercises.common.utils.GeoUtils;
-
-import javax.annotation.Nullable;
-
-import java.io.Serializable;
-import java.time.Instant;
-import java.util.Objects;
 
 /**
  * A TaxiRide is a taxi ride event. There are two types of events, a taxi ride start event and a
@@ -59,6 +59,8 @@ public class TaxiRide implements Comparable<TaxiRide>, Serializable {
         this.passengerCnt = g.passengerCnt();
         this.taxiId = g.taxiId();
         this.driverId = g.driverId();
+        this.startTime = g.startTime();
+        this.endTime = g.endTime();
     }
 
     /** Creates a TaxiRide with the given parameters. */
@@ -95,6 +97,9 @@ public class TaxiRide implements Comparable<TaxiRide>, Serializable {
     public short passengerCnt;
     public long taxiId;
     public long driverId;
+
+    public Instant startTime;
+    public Instant endTime;
 
     @Override
     public String toString() {
