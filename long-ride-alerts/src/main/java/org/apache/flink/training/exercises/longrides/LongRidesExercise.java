@@ -18,9 +18,14 @@
 
 package org.apache.flink.training.exercises.longrides;
 
+import java.io.IOException;
+import java.time.Duration;
+
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -30,10 +35,7 @@ import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.training.exercises.common.datatypes.TaxiRide;
 import org.apache.flink.training.exercises.common.sources.TaxiRideGenerator;
-import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
 import org.apache.flink.util.Collector;
-
-import java.time.Duration;
 
 /**
  * The "Long Ride Alerts" exercise.
@@ -46,6 +48,8 @@ import java.time.Duration;
 public class LongRidesExercise {
     private final SourceFunction<TaxiRide> source;
     private final SinkFunction<Long> sink;
+
+    private static final long TWO_HOUR_MILLS = 2 * 60 * 60 * 1000;
 
     /** Creates a job using the source and sink provided. */
     public LongRidesExercise(SourceFunction<TaxiRide> source, SinkFunction<Long> sink) {
@@ -97,18 +101,72 @@ public class LongRidesExercise {
 
     @VisibleForTesting
     public static class AlertFunction extends KeyedProcessFunction<Long, TaxiRide, Long> {
-
+        ValueState<TaxiRide> endState;
+        ValueState<TaxiRide> startState;
         @Override
-        public void open(Configuration config) throws Exception {
-            throw new MissingSolutionException();
+        public void open(Configuration config) {
+            startState = getRuntimeContext()
+                    .getState(new ValueStateDescriptor<>("startState", TaxiRide.class));
+            endState = getRuntimeContext()
+                    .getState(new ValueStateDescriptor<>("endState", TaxiRide.class));
         }
 
         @Override
         public void processElement(TaxiRide ride, Context context, Collector<Long> out)
-                throws Exception {}
+                throws Exception {
+            TaxiRide startRide = startState.value();
+            TaxiRide endRide = endState.value();
+            if (ride.isStart) {
+                dealStartRide(ride, endRide, context, out);
+            } else {
+                dealEndRide(startRide, ride, context, out);
+            }
+        }
 
         @Override
         public void onTimer(long timestamp, OnTimerContext context, Collector<Long> out)
-                throws Exception {}
+                throws Exception {
+            TaxiRide startRide = startState.value();
+            long startTime = startRide.getEventTimeMillis();
+            if (timestamp == startTime + TWO_HOUR_MILLS) {
+                out.collect(startRide.rideId);
+                clearState();
+            }
+        }
+
+        private void dealStartRide(TaxiRide startRide, TaxiRide endRide, Context context,
+                Collector<Long> out) throws IOException {
+            if (endRide != null) {
+                long offset = endRide.getEventTimeMillis() - startRide.getEventTimeMillis();
+                if (offset >= TWO_HOUR_MILLS) {
+                    out.collect(startRide.rideId);
+                }
+                clearState();
+            } else {
+                startState.update(startRide);
+                context.timerService()
+                        .registerEventTimeTimer(startRide.getEventTimeMillis() + TWO_HOUR_MILLS);
+            }
+        }
+
+        private void dealEndRide(TaxiRide startRide, TaxiRide endRide, Context context,
+                Collector<Long> out) throws IOException {
+            if (startRide != null) {
+                long offset = endRide.getEventTimeMillis() - startRide.getEventTimeMillis();
+                if (offset >= TWO_HOUR_MILLS) {
+                    out.collect(startRide.rideId);
+                }
+                clearState();
+                context.timerService()
+                        .deleteEventTimeTimer(startRide.getEventTimeMillis() + TWO_HOUR_MILLS);
+            } else {
+                endState.update(endRide);
+            }
+        }
+
+        private void clearState() {
+            startState.clear();
+            endState.clear();
+        }
     }
 }
